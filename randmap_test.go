@@ -2,43 +2,51 @@ package randmap
 
 import "testing"
 
-func TestKey(t *testing.T) {
+func TestBuiltinMap(t *testing.T) {
+	const iters = 100000
 	m := map[int]int{
+		0: 0,
 		1: 1,
 		2: 2,
 		3: 3,
 		4: 4,
-		0: 0,
 	}
 	counts := make([]int, len(m))
-	counts2 := make([]int, len(m))
-	for i := 0; i < 100; i++ {
-		counts[Key(m).(int)]++
-	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < iters; i++ {
 		for n := range m {
-			counts2[n]++
+			counts[n]++
 			break
 		}
 	}
-	for n, c := range counts {
-		if (100/len(m))/2 > c || c > (100/len(m))*2 {
-			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (100/len(m))/2, (100/len(m))*2, c, n)
-		}
-		t.Log(n, c)
+	// 0 should be "randomly selected" 45-55% of the time
+	if (iters/2-iters/20) > counts[0] || counts[0] > (iters/2+iters/20) {
+		t.Errorf("expected builtin map to be less random: expected ~%v for elem 0, got %v", iters/2, counts[0])
+	}
+}
+
+func TestKey(t *testing.T) {
+	const iters = 100000
+	m := map[int]int{
+		0: 0,
+		1: 1,
+		2: 2,
+		3: 3,
+		4: 4,
+	}
+	counts := make([]int, len(m))
+	for i := 0; i < iters; i++ {
+		counts[Key(m).(int)]++
 	}
 
-	t.Log("default")
-
-	for n, c := range counts2 {
-		if (100/len(m))/2 > c || c > (100/len(m))*2 {
-			t.Errorf("suspicious default count: expected %v-%v, got %v (%v)", (100/len(m))/2, (100/len(m))*2, c, n)
+	for n, c := range counts {
+		if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (iters/len(m))/2, (iters/len(m))*2, c, n)
 		}
-		t.Log(n, c)
 	}
 }
 
 func TestVal(t *testing.T) {
+	const iters = 100000
 	m := map[int]int{
 		0: 0,
 		1: 1,
@@ -47,17 +55,19 @@ func TestVal(t *testing.T) {
 		4: 4,
 	}
 	counts := make([]int, len(m))
-	for i := 0; i < 100; i++ {
+	for i := 0; i < iters; i++ {
 		counts[Val(m).(int)]++
 	}
-	for _, c := range counts {
-		if (100/len(m))/2 > c || c > (100/len(m))*2 {
-			t.Fatalf("suspicious count: expected %v-%v, got %v", (100/len(m))/2, (100/len(m))*2, c)
+
+	for n, c := range counts {
+		if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (iters/len(m))/2, (iters/len(m))*2, c, n)
 		}
 	}
 }
 
 func TestFastKey(t *testing.T) {
+	const iters = 100000
 	m := map[int]int{
 		0: 0,
 		1: 1,
@@ -66,17 +76,19 @@ func TestFastKey(t *testing.T) {
 		4: 4,
 	}
 	counts := make([]int, len(m))
-	for i := 0; i < 100; i++ {
+	for i := 0; i < iters; i++ {
 		counts[FastKey(m).(int)]++
 	}
-	for _, c := range counts {
-		if (100/len(m))/2 > c || c > (100/len(m))*2 {
-			t.Fatalf("suspicious count: expected %v-%v, got %v", (100/len(m))/2, (100/len(m))*2, c)
+
+	for n, c := range counts {
+		if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (iters/len(m))/2, (iters/len(m))*2, c, n)
 		}
 	}
 }
 
 func TestFastVal(t *testing.T) {
+	const iters = 100000
 	m := map[int]int{
 		0: 0,
 		1: 1,
@@ -85,25 +97,41 @@ func TestFastVal(t *testing.T) {
 		4: 4,
 	}
 	counts := make([]int, len(m))
-	for i := 0; i < 100; i++ {
+	for i := 0; i < iters; i++ {
 		counts[FastVal(m).(int)]++
 	}
-	for _, c := range counts {
-		if (100/len(m))/2 > c || c > (100/len(m))*2 {
-			t.Fatalf("suspicious count: expected %v-%v, got %v", (100/len(m))/2, (100/len(m))*2, c)
+
+	for n, c := range counts {
+		if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (iters/len(m))/2, (iters/len(m))*2, c, n)
 		}
 	}
 }
 
-func TestPtr(t *testing.T) {
-	m := map[string]string{
-		"0": "0",
-		"1": "1",
-		"2": "2",
-		"3": "3",
-		"4": "4",
+func BenchmarkKey(b *testing.B) {
+	m := make(map[int]int, 10000)
+	for i := 0; i < 10000; i++ {
+		m[i] = i
 	}
-	for i := 0; i < len(m); i++ {
-		println(Key(m).(string), Val(m).(string))
-	}
+
+	b.Run("key", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = Key(m).(int)
+		}
+	})
+
+	b.Run("fastkey", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = FastKey(m).(int)
+		}
+	})
+
+	b.Run("stdlib", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			for n := range m {
+				_ = n
+				break
+			}
+		}
+	})
 }

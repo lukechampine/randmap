@@ -153,7 +153,7 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(p) + x)
 }
 
-func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) {
+func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 	// Clear pointer fields so garbage collector does not complain.
 	it.key = nil
 	it.value = nil
@@ -167,7 +167,7 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) {
 	if h == nil || h.count == 0 {
 		it.key = nil
 		it.value = nil
-		return
+		return false
 	}
 
 	it.t = t
@@ -198,25 +198,22 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) {
 	it.wrapped = false
 	it.bptr = nil
 
-	mapiternext(it)
-}
+	// mapiternext
 
-func mapiternext(it *hiter) {
-	h := it.h
-	t := it.t
+	h = it.h
+	t = it.t
 	bucket := it.bucket
 	b := it.bptr
 	i := it.i
 	checkBucket := it.checkBucket
 	alg := t.key.alg
 
-next:
 	if b == nil {
 		if bucket == it.startBucket && it.wrapped {
 			// end of iteration
 			it.key = nil
 			it.value = nil
-			return
+			return false
 		}
 		if h.oldbuckets != nil && it.B == h.B {
 			// Iterator was started in the middle of a grow, and the grow isn't done yet.
@@ -242,96 +239,93 @@ next:
 		}
 		i = 0
 	}
-	for ; i < bucketCnt; i++ {
-		offi := (i + it.offset) & (bucketCnt - 1)
-		k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
-		v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
-		if b.tophash[offi] != empty && b.tophash[offi] != evacuatedEmpty {
-			if checkBucket != noCheck {
-				// Special case: iterator was started during a grow and the
-				// grow is not done yet. We're working on a bucket whose
-				// oldbucket has not been evacuated yet. Or at least, it wasn't
-				// evacuated when we started the bucket. So we're iterating
-				// through the oldbucket, skipping any keys that will go
-				// to the other new bucket (each oldbucket expands to two
-				// buckets during a grow).
-				k2 := k
-				if t.indirectkey {
-					k2 = *((*unsafe.Pointer)(k2))
-				}
-				if t.reflexivekey || alg.equal(k2, k2) {
-					// If the item in the oldbucket is not destined for
-					// the current new bucket in the iteration, skip it.
-					hash := alg.hash(k2, uintptr(h.hash0))
-					if hash&(uintptr(1)<<it.B-1) != checkBucket {
-						continue
-					}
-				} else {
-					// Hash isn't repeatable if k != k (NaNs).  We need a
-					// repeatable and randomish choice of which direction
-					// to send NaNs during evacuation. We'll use the low
-					// bit of tophash to decide which way NaNs go.
-					// NOTE: this case is why we need two evacuate tophash
-					// values, evacuatedX and evacuatedY, that differ in
-					// their low bit.
-					if checkBucket>>(it.B-1) != uintptr(b.tophash[offi]&1) {
-						continue
-					}
-				}
+
+	offi := (i + it.offset) & (bucketCnt - 1)
+	k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
+	v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
+	if b.tophash[offi] == empty || b.tophash[offi] == evacuatedEmpty {
+		return false
+	}
+	if checkBucket != noCheck {
+		// Special case: iterator was started during a grow and the
+		// grow is not done yet. We're working on a bucket whose
+		// oldbucket has not been evacuated yet. Or at least, it wasn't
+		// evacuated when we started the bucket. So we're iterating
+		// through the oldbucket, skipping any keys that will go
+		// to the other new bucket (each oldbucket expands to two
+		// buckets during a grow).
+		k2 := k
+		if t.indirectkey {
+			k2 = *((*unsafe.Pointer)(k2))
+		}
+		if t.reflexivekey || alg.equal(k2, k2) {
+			// If the item in the oldbucket is not destined for
+			// the current new bucket in the iteration, skip it.
+			hash := alg.hash(k2, uintptr(h.hash0))
+			if hash&(uintptr(1)<<it.B-1) != checkBucket {
+				return false
 			}
-			if b.tophash[offi] != evacuatedX && b.tophash[offi] != evacuatedY {
-				// this is the golden data, we can return it.
-				if t.indirectkey {
-					k = *((*unsafe.Pointer)(k))
-				}
-				it.key = k
-				if t.indirectvalue {
-					v = *((*unsafe.Pointer)(v))
-				}
-				it.value = v
-			} else {
-				// The hash table has grown since the iterator was started.
-				// The golden data for this key is now somewhere else.
-				k2 := k
-				if t.indirectkey {
-					k2 = *((*unsafe.Pointer)(k2))
-				}
-				if t.reflexivekey || alg.equal(k2, k2) {
-					// Check the current hash table for the data.
-					// This code handles the case where the key
-					// has been deleted, updated, or deleted and reinserted.
-					// NOTE: we need to regrab the key as it has potentially been
-					// updated to an equal() but not identical key (e.g. +0.0 vs -0.0).
-					rk, rv := mapaccessK(t, h, k2)
-					if rk == nil {
-						continue // key has been deleted
-					}
-					it.key = rk
-					it.value = rv
-				} else {
-					// if key!=key then the entry can't be deleted or
-					// updated, so we can just return it. That's lucky for
-					// us because when key!=key we can't look it up
-					// successfully in the current table.
-					it.key = k2
-					if t.indirectvalue {
-						v = *((*unsafe.Pointer)(v))
-					}
-					it.value = v
-				}
+		} else {
+			// Hash isn't repeatable if k != k (NaNs).  We need a
+			// repeatable and randomish choice of which direction
+			// to send NaNs during evacuation. We'll use the low
+			// bit of tophash to decide which way NaNs go.
+			// NOTE: this case is why we need two evacuate tophash
+			// values, evacuatedX and evacuatedY, that differ in
+			// their low bit.
+			if checkBucket>>(it.B-1) != uintptr(b.tophash[offi]&1) {
+				return false
 			}
-			it.bucket = bucket
-			if it.bptr != b { // avoid unnecessary write barrier; see issue 14921
-				it.bptr = b
-			}
-			it.i = i + 1
-			it.checkBucket = checkBucket
-			return
 		}
 	}
-	b = b.overflow(t)
-	i = 0
-	goto next
+	if b.tophash[offi] != evacuatedX && b.tophash[offi] != evacuatedY {
+		// this is the golden data, we can return it.
+		if t.indirectkey {
+			k = *((*unsafe.Pointer)(k))
+		}
+		it.key = k
+		if t.indirectvalue {
+			v = *((*unsafe.Pointer)(v))
+		}
+		it.value = v
+	} else {
+		// The hash table has grown since the iterator was started.
+		// The golden data for this key is now somewhere else.
+		k2 := k
+		if t.indirectkey {
+			k2 = *((*unsafe.Pointer)(k2))
+		}
+		if t.reflexivekey || alg.equal(k2, k2) {
+			// Check the current hash table for the data.
+			// This code handles the case where the key
+			// has been deleted, updated, or deleted and reinserted.
+			// NOTE: we need to regrab the key as it has potentially been
+			// updated to an equal() but not identical key (e.g. +0.0 vs -0.0).
+			rk, rv := mapaccessK(t, h, k2)
+			if rk == nil {
+				return false // key has been deleted
+			}
+			it.key = rk
+			it.value = rv
+		} else {
+			// if key!=key then the entry can't be deleted or
+			// updated, so we can just return it. That's lucky for
+			// us because when key!=key we can't look it up
+			// successfully in the current table.
+			it.key = k2
+			if t.indirectvalue {
+				v = *((*unsafe.Pointer)(v))
+			}
+			it.value = v
+		}
+	}
+	it.bucket = bucket
+	if it.bptr != b { // avoid unnecessary write barrier; see issue 14921
+		it.bptr = b
+	}
+	it.i = i + 1
+	it.checkBucket = checkBucket
+	return true
 }
 
 // returns both key and value. Used by map iterator
