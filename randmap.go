@@ -40,7 +40,7 @@ func Key(m interface{}) interface{} {
 func Val(m interface{}) interface{} {
 	it := iter(m, csrUintptr(), csrUintptr())
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
-		typ: unsafe.Pointer(it.t.key),
+		typ: unsafe.Pointer(it.t.elem),
 		val: it.value,
 	}))
 }
@@ -56,7 +56,7 @@ func FastKey(m interface{}) interface{} {
 func FastVal(m interface{}) interface{} {
 	it := iter(m, uintptr(mrand.Uint32()), uintptr(mrand.Uint32()))
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
-		typ: unsafe.Pointer(it.t.key),
+		typ: unsafe.Pointer(it.t.elem),
 		val: it.value,
 	}))
 }
