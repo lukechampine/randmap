@@ -165,9 +165,7 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 	it.overflow[1] = nil
 
 	if h == nil || h.count == 0 {
-		it.key = nil
-		it.value = nil
-		return false
+		panic("empty map")
 	}
 
 	it.t = t

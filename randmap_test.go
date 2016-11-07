@@ -108,6 +108,15 @@ func TestFastVal(t *testing.T) {
 	}
 }
 
+func TestEmpty(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic when accessing empty map")
+		}
+	}()
+	_ = Key(make(map[int]int))
+}
+
 func BenchmarkKey(b *testing.B) {
 	m := make(map[int]int, 10000)
 	for i := 0; i < 10000; i++ {
