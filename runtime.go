@@ -198,21 +198,12 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 
 	// mapiternext
 
-	h = it.h
-	t = it.t
 	bucket := it.bucket
 	b := it.bptr
-	i := it.i
 	checkBucket := it.checkBucket
 	alg := t.key.alg
 
 	if b == nil {
-		if bucket == it.startBucket && it.wrapped {
-			// end of iteration
-			it.key = nil
-			it.value = nil
-			return false
-		}
 		if h.oldbuckets != nil && it.B == h.B {
 			// Iterator was started in the middle of a grow, and the grow isn't done yet.
 			// If the bucket we're looking at hasn't been filled in yet (i.e. the old
@@ -233,15 +224,14 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 		bucket++
 		if bucket == uintptr(1)<<it.B {
 			bucket = 0
-			it.wrapped = true
 		}
-		i = 0
 	}
 
-	offi := (i + it.offset) & (bucketCnt - 1)
+	offi := it.offset & (bucketCnt - 1)
 	k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
 	v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
 	if b.tophash[offi] == empty || b.tophash[offi] == evacuatedEmpty {
+		// bucket is empty
 		return false
 	}
 	if checkBucket != noCheck {
@@ -317,12 +307,7 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 			it.value = v
 		}
 	}
-	it.bucket = bucket
-	if it.bptr != b { // avoid unnecessary write barrier; see issue 14921
-		it.bptr = b
-	}
-	it.i = i + 1
-	it.checkBucket = checkBucket
+
 	return true
 }
 

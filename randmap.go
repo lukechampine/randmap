@@ -1,3 +1,5 @@
+// Package randmap provides methods for accessing random elements of maps, and
+// iterating through maps in random order.
 package randmap
 
 import (
@@ -8,84 +10,66 @@ import (
 	mrand "math/rand"
 )
 
-// the global mrand functions are guarded by a mutex. To avoid unnecessary
-// locking, we use our own Rand.
-var urand = mrand.New(mrand.NewSource(1))
-
 type emptyInterface struct {
 	typ unsafe.Pointer
 	val unsafe.Pointer
 }
 
-var max = new(big.Int).SetUint64(uint64(^uint32(0)))
+// the global mrand functions are guarded by a mutex. To avoid unnecessary
+// locking, we use our own Rand.
+var urand = mrand.New(mrand.NewSource(1))
 
-func rUint32s() (uint32, uint32) {
+func pseudoUint32s() (uint32, uint32) {
 	i64 := urand.Int63()
 	return uint32(i64), uint32(i64 >> 32)
 }
 
-func csrUint32s() (uint32, uint32) {
+var max = new(big.Int).SetUint64(uint64(^uint32(0)))
+
+func cryptoUint32s() (uint32, uint32) {
 	r, _ := crand.Int(crand.Reader, max)
 	u64 := r.Uint64()
 	return uint32(u64), uint32(u64 >> 32)
 }
 
-func Key(m interface{}) interface{} {
+func randKey(m interface{}, randFn func() (uint32, uint32)) interface{} {
 	ei := (*emptyInterface)(unsafe.Pointer(&m))
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	it := new(hiter)
-	r1, r2 := csrUint32s()
+	r1, r2 := randFn()
 	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
-		r1, r2 = csrUint32s()
+		r1, r2 = randFn()
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
-		typ: unsafe.Pointer(it.t.key),
+		typ: unsafe.Pointer(t.key),
 		val: it.key,
 	}))
 }
 
-func Val(m interface{}) interface{} {
+func randVal(m interface{}, randFn func() (uint32, uint32)) interface{} {
 	ei := (*emptyInterface)(unsafe.Pointer(&m))
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	it := new(hiter)
-	r1, r2 := csrUint32s()
+	r1, r2 := randFn()
 	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
-		r1, r2 = csrUint32s()
+		r1, r2 = randFn()
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
-		typ: unsafe.Pointer(it.t.elem),
+		typ: unsafe.Pointer(t.elem),
 		val: it.value,
 	}))
 }
 
-func FastKey(m interface{}) interface{} {
-	ei := (*emptyInterface)(unsafe.Pointer(&m))
-	t := (*maptype)(ei.typ)
-	h := (*hmap)(ei.val)
-	it := new(hiter)
-	r1, r2 := rUint32s()
-	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
-		r1, r2 = rUint32s()
-	}
-	return *(*interface{})(unsafe.Pointer(&emptyInterface{
-		typ: unsafe.Pointer(it.t.key),
-		val: it.key,
-	}))
-}
+// Key returns a uniform random key of m, which must be a non-empty map.
+func Key(m interface{}) interface{} { return randKey(m, cryptoUint32s) }
 
-func FastVal(m interface{}) interface{} {
-	ei := (*emptyInterface)(unsafe.Pointer(&m))
-	t := (*maptype)(ei.typ)
-	h := (*hmap)(ei.val)
-	it := new(hiter)
-	r1, r2 := rUint32s()
-	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
-		r1, r2 = rUint32s()
-	}
-	return *(*interface{})(unsafe.Pointer(&emptyInterface{
-		typ: unsafe.Pointer(it.t.elem),
-		val: it.value,
-	}))
-}
+// Val returns a uniform random value of m, which must be a non-empty map.
+func Val(m interface{}) interface{} { return randVal(m, cryptoUint32s) }
+
+// FastKey returns a pseudo-random key of m, which must be a non-empty map.
+func FastKey(m interface{}) interface{} { return randKey(m, pseudoUint32s) }
+
+// FastVal returns a pseudo-random value of m, which must be a non-empty map.
+func FastVal(m interface{}) interface{} { return randVal(m, pseudoUint32s) }
