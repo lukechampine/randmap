@@ -19,6 +19,11 @@ type emptyInterface struct {
 
 var max = new(big.Int).SetUint64(uint64(^uint32(0)))
 
+func rUint32s() (uint32, uint32) {
+	i64 := urand.Int63()
+	return uint32(i64), uint32(i64 >> 32)
+}
+
 func csrUint32s() (uint32, uint32) {
 	r, _ := crand.Int(crand.Reader, max)
 	u64 := r.Uint64()
@@ -60,7 +65,9 @@ func FastKey(m interface{}) interface{} {
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	it := new(hiter)
-	for !mapiterinit(t, h, it, uintptr(urand.Uint32()), uintptr(urand.Uint32())) {
+	r1, r2 := rUint32s()
+	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
+		r1, r2 = rUint32s()
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
 		typ: unsafe.Pointer(it.t.key),
@@ -73,7 +80,9 @@ func FastVal(m interface{}) interface{} {
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	it := new(hiter)
-	for !mapiterinit(t, h, it, uintptr(urand.Uint32()), uintptr(urand.Uint32())) {
+	r1, r2 := rUint32s()
+	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
+		r1, r2 = rUint32s()
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
 		typ: unsafe.Pointer(it.t.elem),
