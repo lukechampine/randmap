@@ -186,48 +186,60 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 	// decide where to start
 	r := r1
 	if h.B > 31-bucketCntBits {
-		r += uintptr(r2) << 31
+		r += r2 << 31
 	}
-	it.startBucket = r & (uintptr(1)<<h.B - 1)
-	it.offset = uint8(r >> h.B & (bucketCnt - 1))
-
-	// iterator state
-	it.bucket = it.startBucket
-	it.wrapped = false
-	it.bptr = nil
 
 	// mapiternext
 
-	bucket := it.bucket
-	b := it.bptr
+	bucket := r & (uintptr(1)<<h.B - 1)
+	offi := uint8(r>>h.B&(bucketCnt-1)) & (bucketCnt - 1)
+
+	var b *bmap
 	checkBucket := it.checkBucket
 	alg := t.key.alg
 
-	if b == nil {
-		if h.oldbuckets != nil && it.B == h.B {
-			// Iterator was started in the middle of a grow, and the grow isn't done yet.
-			// If the bucket we're looking at hasn't been filled in yet (i.e. the old
-			// bucket hasn't been evacuated) then we need to iterate through the old
-			// bucket and only return the ones that will be migrated to this bucket.
-			oldbucket := bucket & (uintptr(1)<<(it.B-1) - 1)
-			b = (*bmap)(add(h.oldbuckets, oldbucket*uintptr(t.bucketsize)))
-			if !evacuated(b) {
-				checkBucket = bucket
-			} else {
-				b = (*bmap)(add(it.buckets, bucket*uintptr(t.bucketsize)))
-				checkBucket = noCheck
-			}
+	if h.oldbuckets != nil && it.B == h.B {
+		// Iterator was started in the middle of a grow, and the grow isn't done yet.
+		// If the bucket we're looking at hasn't been filled in yet (i.e. the old
+		// bucket hasn't been evacuated) then we need to iterate through the old
+		// bucket and only return the ones that will be migrated to this bucket.
+		oldbucket := bucket & (uintptr(1)<<(it.B-1) - 1)
+		b = (*bmap)(add(h.oldbuckets, oldbucket*uintptr(t.bucketsize)))
+		if !evacuated(b) {
+			checkBucket = bucket
 		} else {
 			b = (*bmap)(add(it.buckets, bucket*uintptr(t.bucketsize)))
 			checkBucket = noCheck
 		}
-		bucket++
-		if bucket == uintptr(1)<<it.B {
-			bucket = 0
+	} else {
+		b = (*bmap)(add(it.buckets, bucket*uintptr(t.bucketsize)))
+		checkBucket = noCheck
+	}
+
+	// determine number of overflow buckets
+	var maxOverflow uintptr
+	for i := uintptr(0); i < (1 << h.B); i++ {
+		var over uintptr
+		for bb := b.overflow(t); bb != nil; bb = bb.overflow(t) {
+			over++
+		}
+		if over > maxOverflow {
+			maxOverflow = over
+		}
+	}
+	// select an overflow bucket
+	if maxOverflow > 0 {
+		// NOTE: this random number needs to be independent from the one used
+		// to select the bucket.
+		n := r2 % (maxOverflow + 1)
+		for i := uintptr(0); i < n; i++ {
+			b = b.overflow(t)
+			if b == nil {
+				return false
+			}
 		}
 	}
 
-	offi := it.offset & (bucketCnt - 1)
 	k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
 	v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
 	if b.tophash[offi] == empty || b.tophash[offi] == evacuatedEmpty {

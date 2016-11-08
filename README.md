@@ -37,8 +37,8 @@ for i := range m {
 
 How frequently do you think `0` will be selected, and how frequently will `1`
 be selected? The answer is that `0` will be selected **7x** more frequently
-than `1`! So we cannot rely on map iteration as a means of choosing a random
-element. (Actually, it's even worse than that; for certain map states, there
+than `1`! So we can conclude that map iteration does produce uniformly random
+elements. (Actually, it's even worse than that; for certain map states, there
 are elements that `range` will _never_ start on!)
 
 This leaves us with only two options: we can flatten the map and select a
@@ -48,12 +48,11 @@ small maps, but maps aren't always small.
 
 Neither of these options were acceptable to me, so I now present a third
 option: random map access in constant space and time. Specifically, this
-approach uses O(1) space and O(_k_/_n_ * _t_) time, where _n_ is the number of
-elements in the map, _k_ is the "capacity" of the map (how many elements it
-can hold before being resized), and _t_ is the overhead incurred by a standard
-map iteration. Since Go maps double in size when they grow, the first factor
-should generally be <=2, meaning the total time will not exceed 2x the normal
-map lookup time.
+approach uses O(1) space and O(_L_ * (1 + _k_/_n_)) time, where _n_ is the
+number of elements in the map, _k_ is the "capacity" of the map (how many
+elements it can hold before being resized), and _L_ is the length of the
+longest "bucket chain." Since Go maps double in size when they grow, the
+total time will generally not exceed 2x the normal map lookup time.
 
 The algorithm is as follows: we begin the same way as the builtin algorithm,
 by selecting a random index. If the index contains an element, we return it.

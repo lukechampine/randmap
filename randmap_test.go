@@ -87,6 +87,36 @@ func TestFastKey(t *testing.T) {
 	}
 }
 
+func TestGhostIndex(t *testing.T) {
+	// sometimes, an element is never selected despite thousands of
+	// iterations. This affects the builtin map range as well.
+	const outer = 1000
+	const inner = 1000
+	for i := 0; i < outer; i++ {
+		m := map[int]int{
+			0: 0,
+			1: 1,
+			2: 2,
+			3: 3,
+			4: 4,
+			5: 5,
+			6: 6,
+			7: 7,
+			8: 8,
+		}
+		counts := make([]int, len(m))
+		for j := 0; j < inner; j++ {
+			counts[FastKey(m).(int)]++
+		}
+
+		for n, c := range counts {
+			if c == 0 {
+				t.Fatalf("%v: key %v was never selected!", i, n)
+			}
+		}
+	}
+}
+
 func TestFastVal(t *testing.T) {
 	const iters = 100000
 	m := map[int]int{
