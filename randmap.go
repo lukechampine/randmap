@@ -24,7 +24,7 @@ func pseudoUint32s() (uint32, uint32) {
 	return uint32(i64), uint32(i64 >> 32)
 }
 
-var max = new(big.Int).SetUint64(uint64(^uint32(0)))
+var max = new(big.Int).SetUint64(^uint64(0))
 
 func cryptoUint32s() (uint32, uint32) {
 	r, _ := crand.Int(crand.Reader, max)
