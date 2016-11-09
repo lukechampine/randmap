@@ -153,7 +153,7 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(p) + x)
 }
 
-func maxOverflow(t *maptype, h *hmap) int {
+func maxOverflow(t *maptype, h *hmap) uint8 {
 	var buckets unsafe.Pointer
 	if h.oldbuckets != nil && !evacuated((*bmap)(h.oldbuckets)) {
 		buckets = h.oldbuckets
@@ -161,9 +161,9 @@ func maxOverflow(t *maptype, h *hmap) int {
 		buckets = h.buckets
 	}
 
-	var max int
+	var max uint8
 	for i := uintptr(0); i < (1 << h.B); i++ {
-		var over int
+		var over uint8
 		for b := (*bmap)(add(buckets, i*uintptr(t.bucketsize))).overflow(t); b != nil; over++ {
 			b = b.overflow(t)
 		}
@@ -174,7 +174,9 @@ func maxOverflow(t *maptype, h *hmap) int {
 	return max
 }
 
-func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2, ro uintptr) bool {
+// randIter moves it to a random index in hmap, which may or may not contain
+// valid data. It returns true if the data is valid, and false otherwise.
+func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 	// Clear pointer fields so garbage collector does not complain.
 	it.key = nil
 	it.value = nil
@@ -184,10 +186,6 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2, ro uintptr) bool {
 	it.bptr = nil
 	it.overflow[0] = nil
 	it.overflow[1] = nil
-
-	if h == nil || h.count == 0 {
-		panic("empty map")
-	}
 
 	it.t = t
 	it.h = h
@@ -205,15 +203,12 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2, ro uintptr) bool {
 	}
 
 	// decide where to start
-	r := r1
-	if h.B > 31-bucketCntBits {
-		r += r2 << 31
-	}
+	// NOTE: we can safely use & (instead of the usual modulus) because the
+	// masks are powers of two
+	bucket := r1 & (uintptr(1)<<h.B - 1)
+	offi := r2 & (bucketCnt - 1)
 
 	// mapiternext
-
-	bucket := r & (uintptr(1)<<h.B - 1)
-	offi := uint8(r>>h.B&(bucketCnt-1)) & (bucketCnt - 1)
 
 	var b *bmap
 	checkBucket := it.checkBucket
@@ -238,7 +233,7 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2, ro uintptr) bool {
 	}
 
 	// select an overflow bucket
-	for i := uintptr(0); i < ro; i++ {
+	for i := uint8(0); i < ro; i++ {
 		b = b.overflow(t)
 		if b == nil {
 			return false
