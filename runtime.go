@@ -153,7 +153,28 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(p) + x)
 }
 
-func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
+func maxOverflow(t *maptype, h *hmap) int {
+	var buckets unsafe.Pointer
+	if h.oldbuckets != nil && !evacuated((*bmap)(h.oldbuckets)) {
+		buckets = h.oldbuckets
+	} else {
+		buckets = h.buckets
+	}
+
+	var max int
+	for i := uintptr(0); i < (1 << h.B); i++ {
+		var over int
+		for b := (*bmap)(add(buckets, i*uintptr(t.bucketsize))).overflow(t); b != nil; over++ {
+			b = b.overflow(t)
+		}
+		if over > max {
+			max = over
+		}
+	}
+	return max
+}
+
+func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2, ro uintptr) bool {
 	// Clear pointer fields so garbage collector does not complain.
 	it.key = nil
 	it.value = nil
@@ -216,27 +237,11 @@ func mapiterinit(t *maptype, h *hmap, it *hiter, r1, r2 uintptr) bool {
 		checkBucket = noCheck
 	}
 
-	// determine number of overflow buckets
-	var maxOverflow uintptr
-	for i := uintptr(0); i < (1 << h.B); i++ {
-		var over uintptr
-		for bb := b.overflow(t); bb != nil; bb = bb.overflow(t) {
-			over++
-		}
-		if over > maxOverflow {
-			maxOverflow = over
-		}
-	}
 	// select an overflow bucket
-	if maxOverflow > 0 {
-		// NOTE: this random number needs to be independent from the one used
-		// to select the bucket.
-		n := r2 % (maxOverflow + 1)
-		for i := uintptr(0); i < n; i++ {
-			b = b.overflow(t)
-			if b == nil {
-				return false
-			}
+	for i := uintptr(0); i < ro; i++ {
+		b = b.overflow(t)
+		if b == nil {
+			return false
 		}
 	}
 

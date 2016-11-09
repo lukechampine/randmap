@@ -15,31 +15,35 @@ type emptyInterface struct {
 	val unsafe.Pointer
 }
 
+type randFn func(mod int) (uintptr, uintptr, uintptr)
+
 // the global mrand functions are guarded by a mutex. To avoid unnecessary
 // locking, we use our own Rand.
 var urand = mrand.New(mrand.NewSource(1))
 
-func pseudoUint32s() (uint32, uint32) {
+func pseudoUint32s(mod int) (uintptr, uintptr, uintptr) {
 	i64 := urand.Int63()
-	return uint32(i64), uint32(i64 >> 32)
+	return uintptr(i64), uintptr(i64 >> 32), uintptr(urand.Intn(mod))
 }
 
 var max = new(big.Int).SetUint64(^uint64(0))
 
-func cryptoUint32s() (uint32, uint32) {
+func cryptoUint32s(mod int) (uintptr, uintptr, uintptr) {
 	r, _ := crand.Int(crand.Reader, max)
+	r2, _ := crand.Int(crand.Reader, big.NewInt(int64(mod)))
 	u64 := r.Uint64()
-	return uint32(u64), uint32(u64 >> 32)
+	return uintptr(u64), uintptr(u64 >> 32), uintptr(r2.Uint64())
 }
 
-func randKey(m interface{}, randFn func() (uint32, uint32)) interface{} {
+func randKey(m interface{}, rand randFn) interface{} {
 	ei := (*emptyInterface)(unsafe.Pointer(&m))
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	it := new(hiter)
-	r1, r2 := randFn()
-	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
-		r1, r2 = randFn()
+	mod := maxOverflow(t, h) + 1
+	r1, r2, ro := rand(mod)
+	for !mapiterinit(t, h, it, r1, r2, ro) {
+		r1, r2, ro = rand(mod)
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
 		typ: unsafe.Pointer(t.key),
@@ -47,14 +51,15 @@ func randKey(m interface{}, randFn func() (uint32, uint32)) interface{} {
 	}))
 }
 
-func randVal(m interface{}, randFn func() (uint32, uint32)) interface{} {
+func randVal(m interface{}, rand randFn) interface{} {
 	ei := (*emptyInterface)(unsafe.Pointer(&m))
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	it := new(hiter)
-	r1, r2 := randFn()
-	for !mapiterinit(t, h, it, uintptr(r1), uintptr(r2)) {
-		r1, r2 = randFn()
+	mod := maxOverflow(t, h) + 1
+	r1, r2, ro := rand(mod)
+	for !mapiterinit(t, h, it, r1, r2, ro) {
+		r1, r2, ro = rand(mod)
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
 		typ: unsafe.Pointer(t.elem),
