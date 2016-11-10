@@ -117,6 +117,28 @@ func TestGhostIndex(t *testing.T) {
 	}
 }
 
+func TestInsert(t *testing.T) {
+	// Go maps incrementally copy values after each resize. The randmap
+	// functions should continue to work in the middle of an incremental copy.
+	const outer = 100
+	const inner = 100
+	m := make(map[int]int)
+	for i := 0; i < outer; i++ {
+		m[i] = i
+
+		counts := make([]int, len(m))
+		for j := 0; j < inner*len(m); j++ {
+			counts[FastKey(m).(int)]++
+		}
+
+		for n, c := range counts {
+			if c == 0 {
+				t.Fatalf("%v: key %v was never selected!", i, n)
+			}
+		}
+	}
+}
+
 func TestFastVal(t *testing.T) {
 	const iters = 100000
 	m := map[int]int{

@@ -154,17 +154,25 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 }
 
 func maxOverflow(t *maptype, h *hmap) uint8 {
-	var buckets unsafe.Pointer
-	if h.oldbuckets != nil && !evacuated((*bmap)(h.oldbuckets)) {
-		buckets = h.oldbuckets
-	} else {
-		buckets = h.buckets
-	}
-
 	var max uint8
+	if h.oldbuckets != nil {
+		for i := uintptr(0); i < (1 << h.B); i++ {
+			var over uint8
+			b := (*bmap)(add(h.oldbuckets, i*uintptr(t.bucketsize)))
+			if evacuated(b) {
+				continue
+			}
+			for b = b.overflow(t); b != nil; over++ {
+				b = b.overflow(t)
+			}
+			if over > max {
+				max = over
+			}
+		}
+	}
 	for i := uintptr(0); i < (1 << h.B); i++ {
 		var over uint8
-		for b := (*bmap)(add(buckets, i*uintptr(t.bucketsize))).overflow(t); b != nil; over++ {
+		for b := (*bmap)(add(h.buckets, i*uintptr(t.bucketsize))).overflow(t); b != nil; over++ {
 			b = b.overflow(t)
 		}
 		if over > max {
