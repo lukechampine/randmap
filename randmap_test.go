@@ -3,6 +3,7 @@ package randmap
 import (
 	"bytes"
 	"compress/gzip"
+	"runtime"
 	"testing"
 )
 
@@ -203,6 +204,18 @@ func TestEntropy(t *testing.T) {
 	w.Close()
 	if buf.Len() < len(b) {
 		t.Fatalf("gzip was able to compress random keys by %.2f%%! (%v total bytes)", float64(100*buf.Len())/float64(len(b)), buf.Len())
+	}
+}
+
+func TestGC(t *testing.T) {
+	// if pointers are not preserved, overflow buckets can get garbage
+	// collected. The randmap functions should continue to work in the
+	// presence of GC.
+	m := make(map[int]int)
+	for i := 0; i < 1000; i++ {
+		m[i] = i
+		FastKey(m)
+		runtime.GC()
 	}
 }
 

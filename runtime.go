@@ -145,10 +145,11 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(p) + x)
 }
 
+// maxOverflow returns the length of the longest bucket chain in the map.
 func maxOverflow(t *maptype, h *hmap) uint8 {
 	var max uint8
 	if h.oldbuckets != nil {
-		for i := uintptr(0); i < (1 << h.B); i++ {
+		for i := uintptr(0); i < (1 << (h.B - 1)); i++ {
 			var over uint8
 			b := (*bmap)(add(h.oldbuckets, i*uintptr(t.bucketsize)))
 			if evacuated(b) {
