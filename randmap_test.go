@@ -1,6 +1,10 @@
 package randmap
 
-import "testing"
+import (
+	"bytes"
+	"compress/gzip"
+	"testing"
+)
 
 func TestBuiltinMap(t *testing.T) {
 	const iters = 100000
@@ -167,6 +171,51 @@ func TestEmpty(t *testing.T) {
 		}
 	}()
 	_ = Key(make(map[int]int))
+}
+
+func TestEntropy(t *testing.T) {
+	m := make(map[uint8]uint8)
+	for i := 0; i < 256; i++ {
+		m[uint8(i)] = uint8(i)
+	}
+	b := make([]byte, 10000)
+	for i := range b {
+		b[i] = FastKey(m).(uint8)
+	}
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	w.Write(b)
+	w.Close()
+	if buf.Len() < len(b) {
+		t.Fatalf("gzip was able to compress random keys by %.2f%%! (%v total bytes)", float64(len(b))/float64(buf.Len()), buf.Len())
+	}
+}
+
+func TestConcurrent(t *testing.T) {
+	m := map[int]int{
+		0: 0,
+		1: 1,
+		2: 2,
+		3: 3,
+		4: 4,
+	}
+	const iters = 10000
+	go func() {
+		for i := 0; i < iters/len(m); i++ {
+			for range m {
+			}
+		}
+	}()
+	for i := 0; i < 10; i++ {
+		go func() {
+			for i := 0; i < iters; i++ {
+				Key(m)
+			}
+		}()
+	}
+	for i := 0; i < iters; i++ {
+		Key(m)
+	}
 }
 
 func BenchmarkKey(b *testing.B) {
