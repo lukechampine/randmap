@@ -3,11 +3,45 @@ package randmap
 import (
 	"bytes"
 	"compress/gzip"
+	"math/rand"
 	"runtime"
 	"testing"
 )
 
-func TestBuiltinMap(t *testing.T) {
+// builtinInitKey selects a key by ranging over m and returning the key at the
+// initial position of the iterator. It is biased when the map is sparse or
+// has overflow buckets. It runs in O(1) space and time.
+func builtinInitKey(m map[int]int) (n int) {
+	for n = range m {
+		return
+	}
+	panic("empty map")
+}
+
+// builtinIterKey selects a key by advancing the map iterator a random number
+// of times. It is unbiased. It runs in O(1) space and O(n) time.
+func builtinIterKey(m map[int]int) (n int) {
+	r := rand.Intn(len(m)) + 1
+	for n = range m {
+		if r--; r <= 0 {
+			return
+		}
+	}
+	panic("empty map")
+}
+
+// builtinFlatKey selects a key by flattening the map into a slice of its keys
+// and selecting a random index. It is unbiased. It runs in O(n) space and
+// O(n) time.
+func builtinFlatKey(m map[int]int) int {
+	flat := make([]int, 0, len(m))
+	for n := range m {
+		flat = append(flat, n)
+	}
+	return flat[rand.Intn(len(flat))]
+}
+
+func TestBuiltinMapInit(t *testing.T) {
 	const iters = 100000
 	m := map[int]int{
 		0: 0,
@@ -18,14 +52,55 @@ func TestBuiltinMap(t *testing.T) {
 	}
 	counts := make([]int, len(m))
 	for i := 0; i < iters; i++ {
-		for n := range m {
-			counts[n]++
-			break
-		}
+		counts[builtinInitKey(m)]++
 	}
-	// 0 should be "randomly selected" 45-55% of the time
+	// 0 should be selected 45-55% of the time
 	if (iters/2-iters/20) > counts[0] || counts[0] > (iters/2+iters/20) {
 		t.Errorf("expected builtin map to be less random: expected ~%v for elem 0, got %v", iters/2, counts[0])
+	}
+}
+
+func TestBuiltinMapIter(t *testing.T) {
+	const iters = 100000
+	m := map[int]int{
+		0: 0,
+		1: 1,
+		2: 2,
+		3: 3,
+		4: 4,
+	}
+	counts := make([]int, len(m))
+	for i := 0; i < iters; i++ {
+		counts[builtinIterKey(m)]++
+	}
+
+	// should be unbiased
+	for n, c := range counts {
+		if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (iters/len(m))/2, (iters/len(m))*2, c, n)
+		}
+	}
+}
+
+func TestBuiltinMapFlatten(t *testing.T) {
+	const iters = 100000
+	m := map[int]int{
+		0: 0,
+		1: 1,
+		2: 2,
+		3: 3,
+		4: 4,
+	}
+	counts := make([]int, len(m))
+	for i := 0; i < iters; i++ {
+		counts[builtinFlatKey(m)]++
+	}
+
+	// should be unbiased
+	for n, c := range counts {
+		if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+			t.Errorf("suspicious count: expected %v-%v, got %v (%v)", (iters/len(m))/2, (iters/len(m))*2, c, n)
+		}
 	}
 }
 
@@ -253,23 +328,37 @@ func BenchmarkKey(b *testing.B) {
 	}
 
 	b.Run("key", func(b *testing.B) {
+		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = Key(m).(int)
 		}
 	})
 
 	b.Run("fastkey", func(b *testing.B) {
+		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = FastKey(m).(int)
 		}
 	})
 
-	b.Run("stdlib", func(b *testing.B) {
+	b.Run("stdlib-init", func(b *testing.B) {
+		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			for n := range m {
-				_ = n
-				break
-			}
+			_ = builtinInitKey(m)
+		}
+	})
+
+	b.Run("stdlib-iter", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = builtinIterKey(m)
+		}
+	})
+
+	b.Run("stdlib-flat", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = builtinFlatKey(m)
 		}
 	})
 }
