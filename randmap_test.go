@@ -36,6 +36,11 @@ func TestKey(t *testing.T) {
 		2: 2,
 		3: 3,
 		4: 4,
+		5: 5,
+		6: 6,
+		7: 7,
+		8: 8,
+		9: 9,
 	}
 	counts := make([]int, len(m))
 	for i := 0; i < iters; i++ {
@@ -57,6 +62,11 @@ func TestVal(t *testing.T) {
 		2: 2,
 		3: 3,
 		4: 4,
+		5: 5,
+		6: 6,
+		7: 7,
+		8: 8,
+		9: 9,
 	}
 	counts := make([]int, len(m))
 	for i := 0; i < iters; i++ {
@@ -78,6 +88,11 @@ func TestFastKey(t *testing.T) {
 		2: 2,
 		3: 3,
 		4: 4,
+		5: 5,
+		6: 6,
+		7: 7,
+		8: 8,
+		9: 9,
 	}
 	counts := make([]int, len(m))
 	for i := 0; i < iters; i++ {
@@ -136,8 +151,8 @@ func TestInsert(t *testing.T) {
 		}
 
 		for n, c := range counts {
-			if c == 0 {
-				t.Fatalf("%v: key %v was never selected!", i, n)
+			if inner/2 > c || c > inner*2 {
+				t.Errorf("suspicious count: expected %v-%v, got %v (%v)", inner/2, inner*2, c, n)
 			}
 		}
 	}
@@ -174,20 +189,20 @@ func TestEmpty(t *testing.T) {
 }
 
 func TestEntropy(t *testing.T) {
-	m := make(map[uint8]uint8)
-	for i := 0; i < 256; i++ {
-		m[uint8(i)] = uint8(i)
+	m := make(map[int]int)
+	for j := 0; j < 417; j++ { // 417 chosen to ensure unevacuated map buckets
+		m[j] = j
 	}
 	b := make([]byte, 10000)
-	for i := range b {
-		b[i] = FastKey(m).(uint8)
+	for j := range b {
+		b[j] = byte(FastKey(m).(int))
 	}
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	w.Write(b)
 	w.Close()
 	if buf.Len() < len(b) {
-		t.Fatalf("gzip was able to compress random keys by %.2f%%! (%v total bytes)", float64(len(b))/float64(buf.Len()), buf.Len())
+		t.Fatalf("gzip was able to compress random keys by %.2f%%! (%v total bytes)", float64(100*buf.Len())/float64(len(b)), buf.Len())
 	}
 }
 
