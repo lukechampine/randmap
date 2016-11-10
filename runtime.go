@@ -164,7 +164,7 @@ func maxOverflow(t *maptype, h *hmap) uint8 {
 	return max
 }
 
-// randIter moves it to a random index in hmap, which may or may not contain
+// randIter moves 'it' to a random index in hmap, which may or may not contain
 // valid data. It returns true if the data is valid, and false otherwise.
 func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 	// grab snapshot of bucket state
@@ -240,6 +240,86 @@ func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 			// NOTE: this case is why we need two evacuate tophash
 			// values, evacuatedX and evacuatedY, that differ in
 			// their low bit.
+			if bucket>>(h.B-1) != uintptr(b.tophash[offi]&1) {
+				return false
+			}
+		}
+	}
+
+	it.key = k
+	it.value = v
+	return true
+}
+
+// mapaccessi moves 'it' to offset 'offi' in overflow bucket 'over' of bucket
+// 'bucket' in hmap, which may or may not contain valid data. It returns true
+// if the data is valid, and false otherwise.
+func mapaccessi(t *maptype, h *hmap, it *hiter, bucket uintptr, over, offi uint8) bool {
+	// grab snapshot of bucket state
+	if t.bucket.kind&kindNoPointers != 0 {
+		// Allocate the current slice and remember pointers to both current and old.
+		// This preserves all relevant overflow buckets alive even if
+		// the table grows and/or overflow buckets are added to the table
+		// while we are iterating.
+		h.createOverflow()
+		it.overflow = *h.overflow
+	}
+
+	b := (*bmap)(add(h.buckets, bucket*uintptr(t.bucketsize)))
+
+	checkBucket := false
+	if h.oldbuckets != nil {
+		// Iterator was started in the middle of a grow, and the grow isn't done yet.
+		// If the bucket we're looking at hasn't been filled in yet (i.e. the old
+		// bucket hasn't been evacuated) then we need to use that pointer instead.
+		oldbucket := bucket & (uintptr(1)<<(h.B-1) - 1)
+		oldB := (*bmap)(add(h.oldbuckets, oldbucket*uintptr(t.bucketsize)))
+		if !evacuated(oldB) {
+			b = oldB
+			checkBucket = true
+		}
+	}
+
+	// seek to overflow bucket
+	for i := uint8(0); i < over; i++ {
+		b = b.overflow(t)
+		if b == nil {
+			return false
+		}
+	}
+
+	// check that bucket is not empty
+	if b.tophash[offi] == empty || b.tophash[offi] == evacuatedEmpty {
+		return false
+	}
+
+	// grab the key and value
+	k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
+	v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
+	if t.indirectkey {
+		k = *((*unsafe.Pointer)(k))
+	}
+	if t.indirectvalue {
+		v = *((*unsafe.Pointer)(v))
+	}
+
+	// if this is an old bucket, we need to check whether this key is destined
+	// for the new bucket. Otherwise, we will have a 2x bias towards oldbucket
+	// values, since two different bucket selections can result in the same
+	// oldbucket.
+	if checkBucket {
+		if t.reflexivekey || t.key.alg.equal(k, k) {
+			// If the item in the oldbucket is not destined for
+			// the current new bucket in the iteration, skip it.
+			hash := t.key.alg.hash(k, uintptr(h.hash0))
+			if hash&(uintptr(1)<<h.B-1) != bucket {
+				return false
+			}
+		} else {
+			// Hash isn't repeatable if k != k (NaNs).  We need a
+			// repeatable and randomish choice of which direction
+			// to send NaNs during evacuation. We'll use the low
+			// bit of tophash to decide which way NaNs go.
 			if bucket>>(h.B-1) != uintptr(b.tophash[offi]&1) {
 				return false
 			}

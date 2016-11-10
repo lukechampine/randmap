@@ -362,3 +362,135 @@ func BenchmarkKey(b *testing.B) {
 		}
 	})
 }
+
+func TestIter(t *testing.T) {
+	const iters = 1000
+	m := map[int]int{
+		0: 0,
+		1: 1,
+		2: 2,
+		3: 3,
+		4: 4,
+		5: 5,
+		6: 6,
+		7: 7,
+		8: 8,
+		9: 9,
+	}
+	counts := make([][]int, len(m))
+	for i := range counts {
+		counts[i] = make([]int, len(m))
+	}
+	for i := 0; i < iters; i++ {
+		j := 0
+		Iter(m, func(k, v int) {
+			// key k appeared at index j
+			counts[k][j]++
+			j++
+		})
+	}
+
+	// each key should have appeared at each index about iters/len(m) times
+	for k, cs := range counts {
+		for i, c := range cs {
+			if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+				t.Errorf("suspicious count for key %v index %v: expected %v-%v, got %v", k, i, (iters/len(m))/2, (iters/len(m))*2, c)
+			}
+		}
+	}
+}
+
+func TestFastIter(t *testing.T) {
+	const iters = 1000
+	m := map[int]int{
+		0: 0,
+		1: 1,
+		2: 2,
+		3: 3,
+		4: 4,
+		5: 5,
+		6: 6,
+		7: 7,
+		8: 8,
+		9: 9,
+	}
+	counts := make([][]int, len(m))
+	for i := range counts {
+		counts[i] = make([]int, len(m))
+	}
+	for i := 0; i < iters; i++ {
+		j := 0
+		FastIter(m, func(k, v int) {
+			// key k appeared at index j
+			counts[k][j]++
+			j++
+		})
+	}
+
+	// each key should have appeared at each index about iters/len(m) times
+	for k, cs := range counts {
+		for i, c := range cs {
+			if (iters/len(m))/2 > c || c > (iters/len(m))*2 {
+				t.Errorf("suspicious count for key %v index %v: expected %v-%v, got %v", k, i, (iters/len(m))/2, (iters/len(m))*2, c)
+			}
+		}
+	}
+}
+
+func BenchmarkIter(b *testing.B) {
+	m := make(map[int]int, 10000)
+	for i := 0; i < 10000; i++ {
+		m[i] = i
+	}
+
+	b.Run("iter", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Iter(m, func(int, int) {})
+		}
+	})
+
+	b.Run("fastiter", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			FastIter(m, func(int, int) {})
+		}
+	})
+
+	b.Run("stdlib-init", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			for k, v := range m {
+				_, _ = k, v
+			}
+		}
+	})
+
+	// no known stdlib-iter algorithm. Note that this does not work:
+	//
+	//   for _, i := range rand.Perm(len(m)) {
+	//   	var k int
+	//   	for k = range m {
+	//   		if i--; i <= 0 {
+	//   			break
+	//   		}
+	//   	}
+	//   	_ = k
+	//   }
+	//
+	// because the 'range m' iterator will begin at a different offset each
+	// time.
+
+	b.Run("stdlib-flat", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			flat := make([]int, 0, len(m))
+			for n := range m {
+				flat = append(flat, n)
+			}
+			for _, k := range rand.Perm(len(flat)) {
+				_ = k
+			}
+		}
+	})
+}
