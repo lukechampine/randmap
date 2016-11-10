@@ -21,11 +21,17 @@ type emptyInterface struct {
 // function instead of an io.Reader
 type randReader func(p []byte) (int, error)
 
-func randInts(read randReader, mod uint8) (uintptr, uint8, uint8) {
-	var arena [ptrSize + 2]byte
+func randInts(read randReader, numBuckets uintptr, numOver uint8) (uintptr, uint8, uint8) {
+	space := numBuckets * uintptr(numOver) * bucketCnt
+	var arena [ptrSize]byte
 	read(arena[:])
-	uptr := *(*uintptr)(unsafe.Pointer(&arena[0]))
-	return uptr, arena[ptrSize], arena[ptrSize+1] % mod
+	r := *(*uintptr)(unsafe.Pointer(&arena[0])) % space
+
+	bucket := r / (uintptr(numOver) * bucketCnt)
+	over := (r / bucketCnt) % uintptr(numOver)
+	offi := r % bucketCnt
+
+	return bucket, uint8(over), uint8(offi)
 }
 
 func randPerm(read randReader, n uintptr) []uintptr {
@@ -48,10 +54,11 @@ func randKey(m interface{}, src randReader) interface{} {
 		panic("empty map")
 	}
 	it := new(hiter)
-	mod := maxOverflow(t, h) + 1
-	r1, r2, ro := randInts(src, mod)
-	for !randIter(t, h, it, r1, r2, ro) {
-		r1, r2, ro = randInts(src, mod)
+	numBuckets := uintptr(1) << h.B
+	numOver := maxOverflow(t, h) + 1
+	bucket, over, offi := randInts(src, numBuckets, numOver)
+	for !mapaccessi(t, h, it, bucket, over, offi) {
+		bucket, over, offi = randInts(src, numBuckets, numOver)
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
 		typ: unsafe.Pointer(t.key),
@@ -67,10 +74,11 @@ func randVal(m interface{}, src randReader) interface{} {
 		panic("empty map")
 	}
 	it := new(hiter)
-	mod := maxOverflow(t, h) + 1
-	r1, r2, ro := randInts(src, mod)
-	for !randIter(t, h, it, r1, r2, ro) {
-		r1, r2, ro = randInts(src, mod)
+	numBuckets := uintptr(1) << h.B
+	numOver := maxOverflow(t, h) + 1
+	bucket, over, offi := randInts(src, numBuckets, numOver)
+	for !mapaccessi(t, h, it, bucket, over, offi) {
+		bucket, over, offi = randInts(src, numBuckets, numOver)
 	}
 	return *(*interface{})(unsafe.Pointer(&emptyInterface{
 		typ: unsafe.Pointer(t.elem),
@@ -78,7 +86,7 @@ func randVal(m interface{}, src randReader) interface{} {
 	}))
 }
 
-func iter(m, fn interface{}, src randReader) {
+func randIter(m, fn interface{}, src randReader) {
 	mt := reflect.TypeOf(m)
 	fv, ft := reflect.ValueOf(fn), reflect.TypeOf(fn)
 	if ft.Kind() != reflect.Func || ft.NumIn() != 2 || ft.In(0) != mt.Key() || ft.In(1) != mt.Elem() {
@@ -130,7 +138,7 @@ func Val(m interface{}) interface{} { return randVal(m, crand.Read) }
 // Iter calls fn on the key/value pairs of m in random order. fn must be a
 // function of two arguments whose types match the map's key and value types.
 // Return values of fn are discarded.
-func Iter(m, fn interface{}) { iter(m, fn, crand.Read) }
+func Iter(m, fn interface{}) { randIter(m, fn, crand.Read) }
 
 // FastKey returns a pseudo-random key of m, which must be a non-empty map.
 func FastKey(m interface{}) interface{} { return randKey(m, mrand.Read) }
@@ -141,4 +149,4 @@ func FastVal(m interface{}) interface{} { return randVal(m, mrand.Read) }
 // FastIter calls fn on the key/value pairs of m in pseudo-random order. fn
 // must be a function of two arguments whose types match the map's key and
 // value types. Return values of fn are discarded.
-func FastIter(m, fn interface{}) { iter(m, fn, mrand.Read) }
+func FastIter(m, fn interface{}) { randIter(m, fn, mrand.Read) }
