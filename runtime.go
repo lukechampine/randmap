@@ -63,20 +63,9 @@ type (
 	}
 
 	hiter struct {
-		key         unsafe.Pointer // Must be in first position.  Write nil to indicate iteration end (see cmd/internal/gc/range.go).
-		value       unsafe.Pointer // Must be in second position (see cmd/internal/gc/range.go).
-		t           *maptype
-		h           *hmap
-		buckets     unsafe.Pointer // bucket ptr at hash_iter initialization time
-		bptr        *bmap          // current bucket
-		overflow    [2]*[]*bmap    // keeps overflow buckets alive
-		startBucket uintptr        // bucket iteration started at
-		offset      uint8          // intra-bucket offset to start from during iteration (should be big enough to hold bucketCnt-1)
-		wrapped     bool           // already wrapped around from end of bucket array to beginning
-		B           uint8
-		i           uint8
-		bucket      uintptr
-		checkBucket uintptr
+		key      unsafe.Pointer // Must be in first position.  Write nil to indicate iteration end (see cmd/internal/gc/range.go).
+		value    unsafe.Pointer // Must be in second position (see cmd/internal/gc/range.go).
+		overflow [2]*[]*bmap    // keeps overflow buckets alive
 	}
 
 	_type struct {
@@ -208,7 +197,7 @@ func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 		}
 	}
 
-	// select an overflow bucket
+	// select a random overflow bucket
 	for i := uint8(0); i < ro; i++ {
 		b = b.overflow(t)
 		if b == nil {
@@ -216,12 +205,14 @@ func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 		}
 	}
 
-	k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
-	v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
+	// check that bucket is not empty
 	if b.tophash[offi] == empty || b.tophash[offi] == evacuatedEmpty {
-		// bucket is empty
 		return false
 	}
+
+	// grab the key and value
+	k := add(unsafe.Pointer(b), dataOffset+uintptr(offi)*uintptr(t.keysize))
+	v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+uintptr(offi)*uintptr(t.valuesize))
 	if t.indirectkey {
 		k = *((*unsafe.Pointer)(k))
 	}
