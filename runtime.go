@@ -132,14 +132,6 @@ func (b *bmap) overflow(t *maptype) *bmap {
 	return *(**bmap)(add(unsafe.Pointer(b), uintptr(t.bucketsize)-unsafe.Sizeof(uintptr(0))))
 }
 
-func (h *hmap) setoverflow(t *maptype, b, ovf *bmap) {
-	if t.bucket.kind&kindNoPointers != 0 {
-		h.createOverflow()
-		*h.overflow[0] = append(*h.overflow[0], ovf)
-	}
-	*(**bmap)(add(unsafe.Pointer(b), uintptr(t.bucketsize)-unsafe.Sizeof(uintptr(0)))) = ovf
-}
-
 func (h *hmap) createOverflow() {
 	if h.overflow == nil {
 		h.overflow = new([2]*[]*bmap)
@@ -185,22 +177,7 @@ func maxOverflow(t *maptype, h *hmap) uint8 {
 // randIter moves it to a random index in hmap, which may or may not contain
 // valid data. It returns true if the data is valid, and false otherwise.
 func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
-	// Clear pointer fields so garbage collector does not complain.
-	it.key = nil
-	it.value = nil
-	it.t = nil
-	it.h = nil
-	it.buckets = nil
-	it.bptr = nil
-	it.overflow[0] = nil
-	it.overflow[1] = nil
-
-	it.t = t
-	it.h = h
-
 	// grab snapshot of bucket state
-	it.B = h.B
-	it.buckets = h.buckets
 	if t.bucket.kind&kindNoPointers != 0 {
 		// Allocate the current slice and remember pointers to both current and old.
 		// This preserves all relevant overflow buckets alive even if
@@ -215,29 +192,19 @@ func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 	// masks are powers of two
 	bucket := r1 & (uintptr(1)<<h.B - 1)
 	offi := r2 & (bucketCnt - 1)
+	b := (*bmap)(add(h.buckets, bucket*uintptr(t.bucketsize)))
 
-	// mapiternext
-
-	var b *bmap
-	checkBucket := it.checkBucket
-	alg := t.key.alg
-
-	if h.oldbuckets != nil && it.B == h.B {
+	checkBucket := false
+	if h.oldbuckets != nil {
 		// Iterator was started in the middle of a grow, and the grow isn't done yet.
 		// If the bucket we're looking at hasn't been filled in yet (i.e. the old
-		// bucket hasn't been evacuated) then we need to iterate through the old
-		// bucket and only return the ones that will be migrated to this bucket.
-		oldbucket := bucket & (uintptr(1)<<(it.B-1) - 1)
-		b = (*bmap)(add(h.oldbuckets, oldbucket*uintptr(t.bucketsize)))
-		if !evacuated(b) {
-			checkBucket = bucket
-		} else {
-			b = (*bmap)(add(it.buckets, bucket*uintptr(t.bucketsize)))
-			checkBucket = noCheck
+		// bucket hasn't been evacuated) then we need to use that pointer instead.
+		oldbucket := bucket & (uintptr(1)<<(h.B-1) - 1)
+		oldB := (*bmap)(add(h.oldbuckets, oldbucket*uintptr(t.bucketsize)))
+		if !evacuated(oldB) {
+			b = oldB
+			checkBucket = true
 		}
-	} else {
-		b = (*bmap)(add(it.buckets, bucket*uintptr(t.bucketsize)))
-		checkBucket = noCheck
 	}
 
 	// select an overflow bucket
@@ -254,23 +221,23 @@ func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 		// bucket is empty
 		return false
 	}
-	if checkBucket != noCheck {
-		// Special case: iterator was started during a grow and the
-		// grow is not done yet. We're working on a bucket whose
-		// oldbucket has not been evacuated yet. Or at least, it wasn't
-		// evacuated when we started the bucket. So we're iterating
-		// through the oldbucket, skipping any keys that will go
-		// to the other new bucket (each oldbucket expands to two
-		// buckets during a grow).
-		k2 := k
-		if t.indirectkey {
-			k2 = *((*unsafe.Pointer)(k2))
-		}
-		if t.reflexivekey || alg.equal(k2, k2) {
+	if t.indirectkey {
+		k = *((*unsafe.Pointer)(k))
+	}
+	if t.indirectvalue {
+		v = *((*unsafe.Pointer)(v))
+	}
+
+	// if this is an old bucket, we need to check whether this key is destined
+	// for the new bucket. Otherwise, we will have a 2x bias towards oldbucket
+	// values, since two different bucket selections can result in the same
+	// oldbucket.
+	if checkBucket {
+		if t.reflexivekey || t.key.alg.equal(k, k) {
 			// If the item in the oldbucket is not destined for
 			// the current new bucket in the iteration, skip it.
-			hash := alg.hash(k2, uintptr(h.hash0))
-			if hash&(uintptr(1)<<it.B-1) != checkBucket {
+			hash := t.key.alg.hash(k, uintptr(h.hash0))
+			if hash&(uintptr(1)<<h.B-1) != bucket {
 				return false
 			}
 		} else {
@@ -281,95 +248,13 @@ func randIter(t *maptype, h *hmap, it *hiter, r1 uintptr, r2, ro uint8) bool {
 			// NOTE: this case is why we need two evacuate tophash
 			// values, evacuatedX and evacuatedY, that differ in
 			// their low bit.
-			if checkBucket>>(it.B-1) != uintptr(b.tophash[offi]&1) {
+			if bucket>>(h.B-1) != uintptr(b.tophash[offi]&1) {
 				return false
 			}
 		}
 	}
-	if b.tophash[offi] != evacuatedX && b.tophash[offi] != evacuatedY {
-		// this is the golden data, we can return it.
-		if t.indirectkey {
-			k = *((*unsafe.Pointer)(k))
-		}
-		it.key = k
-		if t.indirectvalue {
-			v = *((*unsafe.Pointer)(v))
-		}
-		it.value = v
-	} else {
-		// The hash table has grown since the iterator was started.
-		// The golden data for this key is now somewhere else.
-		k2 := k
-		if t.indirectkey {
-			k2 = *((*unsafe.Pointer)(k2))
-		}
-		if t.reflexivekey || alg.equal(k2, k2) {
-			// Check the current hash table for the data.
-			// This code handles the case where the key
-			// has been deleted, updated, or deleted and reinserted.
-			// NOTE: we need to regrab the key as it has potentially been
-			// updated to an equal() but not identical key (e.g. +0.0 vs -0.0).
-			rk, rv := mapaccessK(t, h, k2)
-			if rk == nil {
-				return false // key has been deleted
-			}
-			it.key = rk
-			it.value = rv
-		} else {
-			// if key!=key then the entry can't be deleted or
-			// updated, so we can just return it. That's lucky for
-			// us because when key!=key we can't look it up
-			// successfully in the current table.
-			it.key = k2
-			if t.indirectvalue {
-				v = *((*unsafe.Pointer)(v))
-			}
-			it.value = v
-		}
-	}
 
+	it.key = k
+	it.value = v
 	return true
-}
-
-// returns both key and value. Used by map iterator
-func mapaccessK(t *maptype, h *hmap, key unsafe.Pointer) (unsafe.Pointer, unsafe.Pointer) {
-	if h == nil || h.count == 0 {
-		return nil, nil
-	}
-	alg := t.key.alg
-	hash := alg.hash(key, uintptr(h.hash0))
-	m := uintptr(1)<<h.B - 1
-	b := (*bmap)(unsafe.Pointer(uintptr(h.buckets) + (hash&m)*uintptr(t.bucketsize)))
-	if c := h.oldbuckets; c != nil {
-		oldb := (*bmap)(unsafe.Pointer(uintptr(c) + (hash&(m>>1))*uintptr(t.bucketsize)))
-		if !evacuated(oldb) {
-			b = oldb
-		}
-	}
-	top := uint8(hash >> (unsafe.Sizeof(uintptr(0))*8 - 8))
-	if top < minTopHash {
-		top += minTopHash
-	}
-	for {
-		for i := uintptr(0); i < bucketCnt; i++ {
-			if b.tophash[i] != top {
-				continue
-			}
-			k := add(unsafe.Pointer(b), dataOffset+i*uintptr(t.keysize))
-			if t.indirectkey {
-				k = *((*unsafe.Pointer)(k))
-			}
-			if alg.equal(key, k) {
-				v := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+i*uintptr(t.valuesize))
-				if t.indirectvalue {
-					v = *((*unsafe.Pointer)(v))
-				}
-				return k, v
-			}
-		}
-		b = b.overflow(t)
-		if b == nil {
-			return nil, nil
-		}
-	}
 }
