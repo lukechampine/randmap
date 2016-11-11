@@ -34,18 +34,6 @@ func randInts(read randReader, numBuckets uintptr, numOver uint8) (uintptr, uint
 	return bucket, uint8(over), uint8(offi)
 }
 
-func randPerm(read randReader, n uintptr) []uintptr {
-	perm := make([]uintptr, n)
-	var arena [ptrSize]byte
-	for i := uintptr(1); i < n; i++ {
-		read(arena[:])
-		j := *(*uintptr)(unsafe.Pointer(&arena[0])) % (i + 1)
-		perm[i] = perm[j]
-		perm[j] = i
-	}
-	return perm
-}
-
 func randKey(m interface{}, src randReader) interface{} {
 	ei := (*emptyInterface)(unsafe.Pointer(&m))
 	t := (*maptype)(ei.typ)
@@ -86,7 +74,7 @@ func randVal(m interface{}, src randReader) interface{} {
 	}))
 }
 
-func randIter(m, fn interface{}, src randReader) {
+func randIter(m, fn interface{}, read randReader) {
 	mt := reflect.TypeOf(m)
 	fv, ft := reflect.ValueOf(fn), reflect.TypeOf(fn)
 	if ft.Kind() != reflect.Func || ft.NumIn() != 2 || ft.In(0) != mt.Key() || ft.In(1) != mt.Elem() {
@@ -101,16 +89,21 @@ func randIter(m, fn interface{}, src randReader) {
 	if h == nil || h.count == 0 {
 		return
 	}
-	numOver := uintptr(maxOverflow(t, h) + 1)
-	numBuckets := uintptr(1 << h.B)
+	numOver := uint32(maxOverflow(t, h) + 1)
+	numBuckets := uint32(1 << h.B)
 	space := numBuckets * numOver * bucketCnt
 
-	// generate a permutation for the space
-	perm := randPerm(src, space)
+	// create a permutation generator for the space
+	var seed [4]byte
+	read(seed[:])
+	g := newGenerator(space, *(*uint32)(unsafe.Pointer(&seed[0])))
+
+	// iterate through the permutation, accessing each cell and calling fn on
+	// the non-empty ones
 	it := new(hiter)
 	fnIns := make([]reflect.Value, 2)
-	for _, r := range perm {
-		bucket := r / (numOver * bucketCnt)
+	g.Iter(func(r uint32) {
+		bucket := uintptr(r / (numOver * bucketCnt))
 		over := (r / bucketCnt) % numOver
 		offi := r % bucketCnt
 		if mapaccessi(t, h, it, bucket, uint8(over), uint8(offi)) {
@@ -126,7 +119,7 @@ func randIter(m, fn interface{}, src randReader) {
 			fnIns[1] = reflect.ValueOf(v)
 			fv.Call(fnIns)
 		}
-	}
+	})
 }
 
 // Key returns a uniform random key of m, which must be a non-empty map.
