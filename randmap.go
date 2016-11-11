@@ -8,6 +8,8 @@ import (
 
 	crand "crypto/rand"
 	mrand "math/rand"
+
+	"github.com/lukechampine/randmap/perm"
 )
 
 const ptrSize = unsafe.Sizeof(uintptr(0))
@@ -96,7 +98,7 @@ func randIter(m, fn interface{}, read randReader) {
 	// create a permutation generator for the space
 	var seed [4]byte
 	read(seed[:])
-	g := newGenerator(space, *(*uint32)(unsafe.Pointer(&seed[0])))
+	g := perm.NewGenerator(space, *(*uint32)(unsafe.Pointer(&seed[0])))
 
 	// iterate through the permutation, accessing each cell and calling fn on
 	// the non-empty ones
