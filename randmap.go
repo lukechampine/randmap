@@ -76,12 +76,72 @@ func randVal(m interface{}, src randReader) interface{} {
 	}))
 }
 
-func randIter(m, fn interface{}, read randReader) {
-	mt := reflect.TypeOf(m)
-	fv, ft := reflect.ValueOf(fn), reflect.TypeOf(fn)
-	if ft.Kind() != reflect.Func || ft.NumIn() != 2 || ft.In(0) != mt.Key() || ft.In(1) != mt.Elem() {
-		exp := reflect.FuncOf([]reflect.Type{mt.Key(), mt.Elem()}, nil, false)
-		panic("wrong type for fn: expected " + exp.String() + ", got " + ft.String())
+// An Iterator iterates over a map in random or pseudorandom order. It is
+// intended to be used in a for loop like so:
+//
+//  m := make(map[int]int)
+//  var k, v int
+//  i := Iterator(m, &k, &v)
+//  for i.Next() {
+//      // use k and v
+//  }
+//
+type Iterator struct {
+	// permutation generator
+	gen interface {
+		Next() (uint32, bool)
+	}
+
+	it   *hiter
+	k, v reflect.Value
+
+	// constants
+	t    *maptype
+	h    *hmap
+	over uint32
+}
+
+// Next advances the Iterator to the next element in the map, storing its key
+// and value in the pointers passed during initialization. It returns false
+// when all of the elements have been enumerated.
+func (i *Iterator) Next() bool {
+	if i == nil {
+		return false
+	}
+	t, h, it := i.t, i.h, i.it
+
+	for {
+		r, ok := i.gen.Next()
+		if !ok {
+			return false
+		}
+
+		bucket := uintptr(r / (i.over * bucketCnt))
+		over := (r / bucketCnt) % i.over
+		offi := r % bucketCnt
+		if mapaccessi(t, h, it, bucket, uint8(over), uint8(offi)) {
+			// unfortunately, there doesn't seem to be a faster way than this
+			k := *(*interface{})(unsafe.Pointer(&emptyInterface{
+				typ: unsafe.Pointer(t.key),
+				val: it.key,
+			}))
+			v := *(*interface{})(unsafe.Pointer(&emptyInterface{
+				typ: unsafe.Pointer(t.elem),
+				val: it.value,
+			}))
+			i.k.Set(reflect.ValueOf(k))
+			i.v.Set(reflect.ValueOf(v))
+			return true
+		}
+	}
+}
+
+func randIter(m, k, v interface{}, read randReader) *Iterator {
+	mt, kt, vt := reflect.TypeOf(m), reflect.TypeOf(k), reflect.TypeOf(v)
+	if exp := reflect.PtrTo(mt.Key()); kt != exp {
+		panic("wrong type for k: expected " + exp.String() + ", got " + kt.String())
+	} else if exp = reflect.PtrTo(mt.Elem()); vt != exp {
+		panic("wrong type for v: expected " + exp.String() + ", got " + vt.String())
 	}
 
 	// determine total rand space for m
@@ -89,7 +149,7 @@ func randIter(m, fn interface{}, read randReader) {
 	t := (*maptype)(ei.typ)
 	h := (*hmap)(ei.val)
 	if h == nil || h.count == 0 {
-		return
+		return nil
 	}
 	numOver := uint32(maxOverflow(t, h) + 1)
 	numBuckets := uint32(1 << h.B)
@@ -100,28 +160,19 @@ func randIter(m, fn interface{}, read randReader) {
 	read(seed[:])
 	g := perm.NewGenerator(space, *(*uint32)(unsafe.Pointer(&seed[0])))
 
-	// iterate through the permutation, accessing each cell and calling fn on
-	// the non-empty ones
-	it := new(hiter)
-	fnIns := make([]reflect.Value, 2)
-	g.Iter(func(r uint32) {
-		bucket := uintptr(r / (numOver * bucketCnt))
-		over := (r / bucketCnt) % numOver
-		offi := r % bucketCnt
-		if mapaccessi(t, h, it, bucket, uint8(over), uint8(offi)) {
-			k := *(*interface{})(unsafe.Pointer(&emptyInterface{
-				typ: unsafe.Pointer(t.key),
-				val: it.key,
-			}))
-			v := *(*interface{})(unsafe.Pointer(&emptyInterface{
-				typ: unsafe.Pointer(t.elem),
-				val: it.value,
-			}))
-			fnIns[0] = reflect.ValueOf(k)
-			fnIns[1] = reflect.ValueOf(v)
-			fv.Call(fnIns)
-		}
-	})
+	// grab pointers to k and v's memory
+	kptr := reflect.ValueOf(k).Elem()
+	vptr := reflect.ValueOf(v).Elem()
+
+	return &Iterator{
+		gen:  g,
+		it:   new(hiter),
+		k:    kptr,
+		v:    vptr,
+		t:    t,
+		h:    h,
+		over: numOver,
+	}
 }
 
 // Key returns a uniform random key of m, which must be a non-empty map.
@@ -130,18 +181,18 @@ func Key(m interface{}) interface{} { return randKey(m, crand.Read) }
 // Val returns a uniform random value of m, which must be a non-empty map.
 func Val(m interface{}) interface{} { return randVal(m, crand.Read) }
 
-// Iter calls fn on the key/value pairs of m in random order. fn must be a
-// function of two arguments whose types match the map's key and value types.
-// Return values of fn are discarded.
-func Iter(m, fn interface{}) { randIter(m, fn, crand.Read) }
+// Iter returns a random iterator for m. Each call to Next will store the next
+// key/value pair in k and v, which must be pointers. Modifying the map during
+// iteration will result in undefined behavior.
+func Iter(m, k, v interface{}) *Iterator { return randIter(m, k, v, crand.Read) }
 
-// FastKey returns a pseudo-random key of m, which must be a non-empty map.
+// FastKey returns a pseudorandom key of m, which must be a non-empty map.
 func FastKey(m interface{}) interface{} { return randKey(m, mrand.Read) }
 
-// FastVal returns a pseudo-random value of m, which must be a non-empty map.
+// FastVal returns a pseudorandom value of m, which must be a non-empty map.
 func FastVal(m interface{}) interface{} { return randVal(m, mrand.Read) }
 
-// FastIter calls fn on the key/value pairs of m in pseudo-random order. fn
-// must be a function of two arguments whose types match the map's key and
-// value types. Return values of fn are discarded.
-func FastIter(m, fn interface{}) { randIter(m, fn, mrand.Read) }
+// FastIter returns a pseudorandom iterator for m. Each call to Next will
+// store the next key/value pair in k and v, which must be pointers. Modifying
+// the map during iteration will result in undefined behavior.
+func FastIter(m, k, v interface{}) *Iterator { return randIter(m, k, v, mrand.Read) }

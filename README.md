@@ -35,9 +35,9 @@ for i := range m {
 }
 ```
 
-How frequently do you think `0` will be selected, and how frequently will `1`
-be selected? The answer is that `0` will be selected **7x** more frequently
-than `1`! So we can conclude that map iteration does produce uniformly random
+How frequently do you think 0 will be selected, and how frequently will 1 be
+selected? The answer is that 0 will be selected **7x** more frequently than 1!
+So we can conclude that map iteration does not produce uniformly random
 elements. (Actually, it's even worse than that; for certain map states, there
 are elements that `range` will _never_ start on!)
 
@@ -51,8 +51,8 @@ option: random map access in constant space and time. Specifically, this
 approach uses O(1) space and O(_L_ * (1 + _k_/_n_)) time, where _n_ is the
 number of elements in the map, _k_ is the "capacity" of the map (how many
 elements it can hold before being resized), and _L_ is the length of the
-longest "bucket chain." Since Go maps double in size when they grow, the
-total time will generally not exceed 2x the normal map lookup time.
+longest "bucket chain." Since Go maps double in size when they grow, the total
+time will generally not exceed 2x the normal map lookup time.
 
 The algorithm is as follows: we begin the same way as the builtin algorithm,
 by selecting a random index. If the index contains an element, we return it.
@@ -62,6 +62,17 @@ actually has an unbounded run time (because you may select the same index
 twice), but in practice this is rare. I may improve the implementation later
 to iterate through a random permutation of indices, which would guarantee
 eventual termination.
+
+## Random Iteration ##
+
+randmap provides `Iter` and `FastIter` functions for iterating through maps in
+random or pseudeorandom order. The standard way to do this is to flatten the
+map and use `math/rand.Perm` to iterate through the slice. Although this is
+sufficiently random, it requires O(_n_) space and time, which is infeasible
+for large maps. randmap instead uses a Feistel network to simultaneously
+generate and iterate through permutations in constant space. This approach is
+further detailed in the docstring of the `perm` subpackage. The main tradeoff
+is that the generator approach will be much slower when _n_ is small.
 
 ## Examples ##
 
@@ -84,14 +95,17 @@ k := randmap.FastKey(m).(int)
 v := randmap.FastVal(m).(int)
 
 // iterate in random order
-randmap.Iter(m, func(k, v int) {
+var k, v int
+i := randmap.Iter(m, &k, &v)
+for i.Next() {
 	// use k and v
-})
+}
 
 // iterate in pseudorandom order
-randmap.FastIter(m, func(k, v int) {
+i := randmap.FastIter(m, &k, &v)
+for i.Next() {
 	// use k and v
-})
+}
 ```
 
 In case it wasn't obvious, `Key`/`Val`/`Iter` use `crypto/rand`, while their
@@ -101,10 +115,17 @@ requires cryptographically strong randomness.
 ## Caveats ##
 
 This package obviously depends heavily on the internal representation of the
-`map` type. If it changes, this package may break.
+`map` type. If it changes, this package may break. By the way, the `map` type
+is changing in Go 1.8.
 
 The runtime code governing maps is a bit esoteric, and uses constructs that
 aren't available outside of the runtime. Concurrent map operations are
 especially tricky. For now, no guarantees are made about concurrent use of the
 functions in this package. Guarding map accesses with a mutex should be
 sufficient to prevent any problems.
+
+The provided Iterators are not guaranteed to uniformly cover the full
+permutation space of a given map. This is because the number of permutations
+may be much larger than the entropy of the iterator's seed. Nevertheless, the
+seed is sufficient to prevent an attacker from guessing which permutation was
+selected.

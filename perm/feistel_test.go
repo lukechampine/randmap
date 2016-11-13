@@ -13,13 +13,15 @@ func TestGenerator(t *testing.T) {
 		counts[i] = make([]int, numElems)
 	}
 	for i := 0; i < iters; i++ {
-		j := 0
 		g := NewGenerator(numElems, rand.Uint32())
-		g.Iter(func(u uint32) {
+		for j := 0; ; j++ {
+			u, ok := g.Next()
+			if !ok {
+				break
+			}
 			// u appeared at index j
 			counts[u][j]++
-			j++
-		})
+		}
 	}
 
 	// each key should have appeared at each index about iters/numElems times

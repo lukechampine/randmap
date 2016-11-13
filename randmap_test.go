@@ -18,9 +18,9 @@ func builtinInitKey(m map[int]int) (n int) {
 	panic("empty map")
 }
 
-// builtinIterKey selects a key by advancing the map iterator a random number
+// builtinSeekKey selects a key by advancing the map iterator a random number
 // of times. It is unbiased. It runs in O(1) space and O(n) time.
-func builtinIterKey(m map[int]int) (n int) {
+func builtinSeekKey(m map[int]int) (n int) {
 	r := rand.Intn(len(m)) + 1
 	for n = range m {
 		if r--; r <= 0 {
@@ -30,10 +30,10 @@ func builtinIterKey(m map[int]int) (n int) {
 	panic("empty map")
 }
 
-// builtinFlatKey selects a key by flattening the map into a slice of its keys
+// builtinFlattenKey selects a key by flattening the map into a slice of its keys
 // and selecting a random index. It is unbiased. It runs in O(n) space and
 // O(n) time.
-func builtinFlatKey(m map[int]int) int {
+func builtinFlattenKey(m map[int]int) int {
 	flat := make([]int, 0, len(m))
 	for n := range m {
 		flat = append(flat, n)
@@ -60,7 +60,7 @@ func TestBuiltinMapInit(t *testing.T) {
 	}
 }
 
-func TestBuiltinMapIter(t *testing.T) {
+func TestBuiltinMapSeek(t *testing.T) {
 	const iters = 100000
 	m := map[int]int{
 		0: 0,
@@ -71,7 +71,7 @@ func TestBuiltinMapIter(t *testing.T) {
 	}
 	counts := make([]int, len(m))
 	for i := 0; i < iters; i++ {
-		counts[builtinIterKey(m)]++
+		counts[builtinSeekKey(m)]++
 	}
 
 	// should be unbiased
@@ -93,7 +93,7 @@ func TestBuiltinMapFlatten(t *testing.T) {
 	}
 	counts := make([]int, len(m))
 	for i := 0; i < iters; i++ {
-		counts[builtinFlatKey(m)]++
+		counts[builtinFlattenKey(m)]++
 	}
 
 	// should be unbiased
@@ -341,24 +341,17 @@ func BenchmarkKey(b *testing.B) {
 		}
 	})
 
-	b.Run("stdlib-init", func(b *testing.B) {
+	b.Run("seek", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_ = builtinInitKey(m)
+			_ = builtinSeekKey(m)
 		}
 	})
 
-	b.Run("stdlib-iter", func(b *testing.B) {
+	b.Run("flatten", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_ = builtinIterKey(m)
-		}
-	})
-
-	b.Run("stdlib-flat", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_ = builtinFlatKey(m)
+			_ = builtinFlattenKey(m)
 		}
 	})
 }
@@ -381,13 +374,13 @@ func TestIter(t *testing.T) {
 	for i := range counts {
 		counts[i] = make([]int, len(m))
 	}
+	var k, v int
 	for i := 0; i < iters; i++ {
-		j := 0
-		Iter(m, func(k, v int) {
+		it := Iter(m, &k, &v)
+		for j := 0; it.Next(); j++ {
 			// key k appeared at index j
 			counts[k][j]++
-			j++
-		})
+		}
 	}
 
 	// each key should have appeared at each index about iters/len(m) times
@@ -418,13 +411,13 @@ func TestFastIter(t *testing.T) {
 	for i := range counts {
 		counts[i] = make([]int, len(m))
 	}
+	var k, v int
 	for i := 0; i < iters; i++ {
-		j := 0
-		FastIter(m, func(k, v int) {
+		it := FastIter(m, &k, &v)
+		for j := 0; it.Next(); j++ {
 			// key k appeared at index j
 			counts[k][j]++
-			j++
-		})
+		}
 	}
 
 	// each key should have appeared at each index about iters/len(m) times
@@ -437,51 +430,42 @@ func TestFastIter(t *testing.T) {
 	}
 }
 
+func TestIterBadType(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic when passing wrong type to Iter")
+		}
+	}()
+	_ = Iter(make(map[int]int), new(uint8), new(uint8))
+}
+
 func BenchmarkIter(b *testing.B) {
-	m := make(map[int]int, 10000)
-	for i := 0; i < 10000; i++ {
+	m := make(map[int]int, 1000)
+	for i := 0; i < 1000; i++ {
 		m[i] = i
 	}
 
 	b.Run("iter", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			Iter(m, func(int, int) {})
+			var k, v int
+			it := FastIter(m, &k, &v)
+			for it.Next() {
+			}
 		}
 	})
 
 	b.Run("fastiter", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			FastIter(m, func(int, int) {})
-		}
-	})
-
-	b.Run("stdlib-init", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			for k, v := range m {
-				_, _ = k, v
+			var k, v int
+			it := FastIter(m, &k, &v)
+			for it.Next() {
 			}
 		}
 	})
 
-	// no known stdlib-iter algorithm. Note that this does not work:
-	//
-	//   for _, i := range rand.Perm(len(m)) {
-	//   	var k int
-	//   	for k = range m {
-	//   		if i--; i <= 0 {
-	//   			break
-	//   		}
-	//   	}
-	//   	_ = k
-	//   }
-	//
-	// because the 'range m' iterator will begin at a different offset each
-	// time.
-
-	b.Run("stdlib-flat", func(b *testing.B) {
+	b.Run("flatten", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			flat := make([]int, 0, len(m))

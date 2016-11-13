@@ -31,6 +31,7 @@ type feistelGenerator struct {
 	rightMask   uint32
 	seed        uint32
 	numElems    uint32
+	i           uint32
 
 	hash  hash.Hash
 	arena [32]byte
@@ -57,13 +58,15 @@ func NewGenerator(numElems, seed uint32) *feistelGenerator {
 	}
 }
 
-func (f *feistelGenerator) Iter(fn func(u uint32)) {
-	for i := uint32(0); i < f.nextPow4; i++ {
-		n := f.encryptIndex(i)
+func (f *feistelGenerator) Next() (uint32, bool) {
+	for f.i < f.nextPow4 {
+		n := f.encryptIndex(f.i)
+		f.i++
 		if n < f.numElems {
-			fn(n)
+			return n, true
 		}
 	}
+	return 0, false
 }
 
 func (f *feistelGenerator) encryptIndex(index uint32) uint32 {
