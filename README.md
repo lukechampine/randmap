@@ -11,6 +11,13 @@ go get github.com/lukechampine/randmap
 randmap provides methods for accessing random elements of maps, and iterating
 through maps in random order.
 
+**WARNING:** randmap uses the `unsafe` package to access the internal Go map
+type. In general, you should think twice before running any code that imports
+`unsafe`. Please read the full README (and the code!) if you are considering
+using randmap in any serious capacity. If requested, I will also provide
+(less efficient) functions for accessing random keys and values in a safe
+manner.
+
 First, it is important to clear up a misconception about Go's map type: that
 `range` iterates through maps in random order. Well, what does the Language
 Specification say?
