@@ -14,9 +14,9 @@ through maps in random order.
 **WARNING:** randmap uses the `unsafe` package to access the internal Go map
 type. In general, you should think twice before running any code that imports
 `unsafe`. Please read the full README (and the code!) if you are considering
-using randmap in any serious capacity. If requested, I will also provide
-(less efficient) functions for accessing random keys and values in a safe
-manner.
+using randmap in any serious capacity. If you want the `randmap` functionality
+without the risks, you can import the `randmap/safe` package instead, which
+is far less efficient but does not use `unsafe`.
 
 First, it is important to clear up a misconception about Go's map type: that
 `range` iterates through maps in random order. Well, what does the Language
@@ -123,7 +123,8 @@ requires cryptographically strong randomness.
 
 This package obviously depends heavily on the internal representation of the
 `map` type. If it changes, this package may break. By the way, the `map` type
-is changing in Go 1.8.
+is changing in Go 1.8. As stated above, use the `randmap/safe` package if you
+want the functionality of `randmap` without the risks.
 
 The runtime code governing maps is a bit esoteric, and uses constructs that
 aren't available outside of the runtime. Concurrent map operations are
