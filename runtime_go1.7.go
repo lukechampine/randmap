@@ -1,3 +1,5 @@
+// +build go1.7
+
 package randmap
 
 import "unsafe"
