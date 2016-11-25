@@ -8,8 +8,9 @@ randmap
 go get github.com/lukechampine/randmap
 ```
 
-randmap provides methods for accessing random elements of maps, and iterating
-through maps in random order.
+randmap provides methods for (efficiently) accessing random elements of maps, and iterating
+through maps in random order. [Here is a blog post](http://lukechampine.com/hackmap.html) that dives deeper into how I
+accomplished this, if you're interested in that sort of thing.
 
 **WARNING:** randmap uses the `unsafe` package to access the internal Go map
 type. In general, you should think twice before running any code that imports
